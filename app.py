@@ -5,35 +5,26 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from io import BytesIO
 import os
+import zipfile
 
 def format_cpf(cpf):
-    # Remove todos os caracteres não numéricos
     cpf_numerico = re.sub(r'\D', '', cpf)
     return cpf_numerico
 
 def obter_primeiro_nome(nome_completo):
     if not nome_completo:
         return "documento"
-    
-    # Remove espaços extras e divide
     partes = nome_completo.strip().split()
-    
-    # Retorna primeiro nome ou "documento" se não houver nomes
     return partes[0].lower() if partes else "documento"
 
 def formatar_nome_arquivo(nome_original, primeiro_nome):
-    # Encontra a extensão do arquivo
     nome, extensao = os.path.splitext(nome_original)
-    
-    # Retorna o novo nome do arquivo
     return f"{nome}_{primeiro_nome}{extensao}"
 
 def add_watermark(input_pdf, name, cpf):
-    # Formatar CPF para exibição
     cpf_formatado = format_cpf(cpf)
     cpf_exibicao = f"{cpf_formatado[:3]}.{cpf_formatado[3:6]}.{cpf_formatado[6:9]}-{cpf_formatado[9:]}"
 
-    # Criar marca d'água
     packet = BytesIO()
     can = canvas.Canvas(packet, pagesize=letter)
     can.setFont("Helvetica", 10)
@@ -43,7 +34,6 @@ def add_watermark(input_pdf, name, cpf):
     packet.seek(0)
     watermark = PdfReader(packet)
 
-    # Adicionar marca d'água ao PDF
     reader = PdfReader(input_pdf)
     writer = PdfWriter()
 
@@ -52,28 +42,6 @@ def add_watermark(input_pdf, name, cpf):
         page_obj.merge_page(watermark.pages[0])
         writer.add_page(page_obj)
 
-    # Salva em um BytesIO para retorno
-    output_packet = BytesIO()
-    writer.write(output_packet)
-    output_packet.seek(0)
-    return output_packet
-
-def encrypt_pdf(input_pdf, password):
-    reader = PdfReader(input_pdf)
-    writer = PdfWriter()
-
-    # Adiciona todas as páginas ao writer
-    for page in reader.pages:
-        writer.add_page(page)
-
-    # Criptografia com AES de 256 bits e permissões restritas
-    writer.encrypt(
-        password,
-        owner_password=None,
-        use_128bit=False
-    )
-
-    # Salva em um BytesIO para retorno
     output_packet = BytesIO()
     writer.write(output_packet)
     output_packet.seek(0)
@@ -81,41 +49,36 @@ def encrypt_pdf(input_pdf, password):
 
 def main():
     st.set_page_config(
-        page_title="Proteção de PDF",
-        page_icon="🔒",
+        page_title="Adição de Marca D'água em PDFs",
+        page_icon="🖋️",
         layout="wide"
     )
 
-    st.title("🔒 Proteção de Documentos PDF")
-    st.write("Adicione marca d'água e criptografia ao seu PDF")
+    st.title("🖋️ Adição de Marca D'água em PDFs")
+    st.write("Adicione uma marca d'água com nome e CPF aos seus PDFs")
 
-    # Sidebar de instruções
     st.sidebar.header("📝 Instruções")
     st.sidebar.markdown("""
-    1. Faça upload do PDF original
+    1. Faça upload dos PDFs originais
     2. Adicione informações pessoais
-    3. Gere PDF protegido
+    3. Gere PDFs com marca d'água
     """)
 
-    # Upload do PDF
-    uploaded_file = st.file_uploader(
-        "Escolha um arquivo PDF", 
+    uploaded_files = st.file_uploader(
+        "Escolha os arquivos PDF", 
         type=['pdf'], 
-        help="Selecione o documento PDF que deseja proteger"
+        accept_multiple_files=True,
+        help="Selecione os documentos PDF aos quais deseja adicionar a marca d'água"
     )
 
-    if uploaded_file is not None:
-        # Informações pessoais (obrigatórias)
+    if uploaded_files:
         st.subheader("👤 Informações Pessoais")
         name = st.text_input("Nome Completo")
         cpf = st.text_input("CPF")
 
-        # Primeiro nome para o arquivo
         primeiro_nome = obter_primeiro_nome(name)
 
-        # Botão de processamento
-        if st.button("Proteger PDF"):
-            # Validações
+        if st.button("Adicionar Marca D'água"):
             if not name:
                 st.error("Nome completo é obrigatório!")
                 return
@@ -125,28 +88,41 @@ def main():
                 return
 
             try:
-                # Formata o CPF para a senha
-                senha = format_cpf(cpf)
+                processed_pdfs = []
+                progress_bar = st.progress(0)
 
-                # Gera nome do arquivo de saída
-                nome_arquivo_saida = formatar_nome_arquivo(uploaded_file.name, primeiro_nome)
+                for i, uploaded_file in enumerate(uploaded_files):
+                    nome_arquivo_saida = formatar_nome_arquivo(uploaded_file.name, primeiro_nome)
+                    processed_pdf = add_watermark(uploaded_file, name, cpf)
+                    processed_pdfs.append((nome_arquivo_saida, processed_pdf))
+                    progress_bar.progress((i + 1) / len(uploaded_files))
 
-                # Adiciona marca d'água
-                processed_pdf = add_watermark(uploaded_file, name, cpf)
+                st.success("Marca d'água adicionada com sucesso a todos os PDFs! 🎉")
 
-                # Criptografa o PDF
-                final_pdf = encrypt_pdf(processed_pdf, senha)
+                # Opção para baixar todos os PDFs em um arquivo ZIP
+                if len(processed_pdfs) > 1:
+                    zip_buffer = BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+                        for file_name, file_data in processed_pdfs:
+                            zip_file.writestr(file_name, file_data.getvalue())
+                    
+                    st.download_button(
+                        label="📥 Baixar todos os PDFs com marca d'água (ZIP)",
+                        data=zip_buffer.getvalue(),
+                        file_name="pdfs_com_marca_dagua.zip",
+                        mime="application/zip"
+                    )
 
-                # Download do PDF
-                st.download_button(
-                    label="📥 Baixar PDF Protegido",
-                    data=final_pdf,
-                    file_name=nome_arquivo_saida,
-                    mime="application/pdf"
-                )
-
-                st.success("PDF protegido com sucesso! 🎉")
-                st.warning(f"⚠️ Senha de acesso: {senha}")
+                # Opção para baixar PDFs individualmente
+                st.write("Ou baixe os PDFs individualmente:")
+                for file_name, file_data in processed_pdfs:
+                    st.download_button(
+                        label=f"📥 Baixar {file_name}",
+                        data=file_data,
+                        file_name=file_name,
+                        mime="application/pdf",
+                        key=file_name  # Necessário para criar botões únicos
+                    )
 
             except Exception as e:
                 st.error(f"Erro no processamento: {e}")
